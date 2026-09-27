@@ -1,0 +1,36 @@
+diff --git a/node_modules/react-native-camera-kit/android/src/main/java/com/rncamerakit/CKCamera.kt b/node_modules/react-native-camera-kit/android/src/main/java/com/rncamerakit/CKCamera.kt
+index bf8d9e7..f35cb4d 100644
+--- a/node_modules/react-native-camera-kit/android/src/main/java/com/rncamerakit/CKCamera.kt
++++ b/node_modules/react-native-camera-kit/android/src/main/java/com/rncamerakit/CKCamera.kt
+@@ -93,7 +93,7 @@ class CKCamera(context: ThemedReactContext) : FrameLayout(context), LifecycleObs
+     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+     private var cameraProvider: ProcessCameraProvider? = null
+     private var outputPath: String? = null
+-    private var shutterAnimationDuration: Int = 50
++    private var shutterAnimationDuration: Int = 0
+     private var shutterPhotoSound: Boolean = true
+     private var effectLayer = View(context)
+ 
+diff --git a/node_modules/react-native-camera-kit/ios/ReactNativeCameraKit/CameraView.swift b/node_modules/react-native-camera-kit/ios/ReactNativeCameraKit/CameraView.swift
+index 28720e7..71649c9 100644
+--- a/node_modules/react-native-camera-kit/ios/ReactNativeCameraKit/CameraView.swift
++++ b/node_modules/react-native-camera-kit/ios/ReactNativeCameraKit/CameraView.swift
+@@ -354,16 +354,8 @@ public class CameraView: UIView {
+         onError: @escaping (_ error: String) -> Void
+     ) {
+         camera.capturePicture(
+-            onWillCapture: { [weak self] in
+-                // Flash/dim preview to indicate shutter action
+-                DispatchQueue.main.async {
+-                    self?.camera.previewView.alpha = 0
+-                    UIView.animate(
+-                        withDuration: 0.35,
+-                        animations: {
+-                            self?.camera.previewView.alpha = 1
+-                        })
+-                }
++            onWillCapture: {
++                // Keep the preview steady. A shutter blink reads as a screen flash in the dark.
+             },
+             onSuccess: { [weak self] imageData, thumbnailData, dimensions in
+                 DispatchQueue.global(qos: .default).async {

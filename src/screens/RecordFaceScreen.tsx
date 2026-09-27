@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -8,15 +9,16 @@ import {
   View,
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import { Camera, CameraType } from 'react-native-camera-kit';
+import { Camera, CameraType, type CameraApi } from 'react-native-camera-kit';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CircleButton } from '../components/CircleButton';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { TickRing } from '../components/TickRing';
 import type { RecordFaceScreenProps } from '../navigation/types';
 import {
-  isCircleComplete,
-  tickForPose,
+  faceAngle,
+  ringTicksForShots,
+  type FaceAngle,
 } from '../services/faceCircle';
 import { colors } from '../theme/colors';
 
@@ -29,18 +31,50 @@ type FaceEvent = {
   };
 };
 
+type FaceShots = Record<FaceAngle, string | null>;
+
+const EMPTY_SHOTS: FaceShots = {
+  left: null,
+  center: null,
+  right: null,
+};
+
+const SHOT_ORDER: FaceAngle[] = ['left', 'center', 'right'];
+const HOLD_FRAMES = 6;
+const CAPTURE_GAP_MS = 700;
+
+function poseName(angle: FaceAngle): string {
+  if (angle === 'left') {
+    return 'left';
+  }
+  if (angle === 'right') {
+    return 'right';
+  }
+  return 'center';
+}
+
 export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
   const isFocused = useIsFocused();
   const { width } = useWindowDimensions();
   const ringSize = Math.min(width - 36, 360);
   const cameraSize = ringSize - 44;
 
-  const [visited, setVisited] = useState<ReadonlySet<number>>(() => new Set());
   const [faceSeen, setFaceSeen] = useState(false);
   const [modelState, setModelState] = useState<string | null>(null);
   const [succeeded, setSucceeded] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [shots, setShots] = useState<FaceShots>(EMPTY_SHOTS);
+  const [livePose, setLivePose] = useState<FaceAngle | null>(null);
   const finished = useRef(false);
+  const cameraRef = useRef<CameraApi>(null);
+  const shotsRef = useRef<FaceShots>(EMPTY_SHOTS);
+  const captureBusy = useRef(false);
+  const nextCaptureAt = useRef(0);
+  const streak = useRef<{ angle: FaceAngle | null; count: number }>({
+    angle: null,
+    count: 0,
+  });
 
   const finish = useCallback(() => {
     if (finished.current) {
@@ -49,6 +83,33 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
     finished.current = true;
     setOptionsOpen(false);
     setSucceeded(true);
+  }, []);
+
+  const captureAngle = useCallback((angle: FaceAngle) => {
+    if (shotsRef.current[angle] || captureBusy.current || !cameraRef.current) {
+      return;
+    }
+    captureBusy.current = true;
+    setCapturing(true);
+    streak.current = { angle: null, count: 0 };
+    cameraRef.current
+      .capture()
+      .then(photo => {
+        const uri = photo?.uri;
+        if (!uri || shotsRef.current[angle]) {
+          return;
+        }
+        const next = { ...shotsRef.current, [angle]: uri };
+        shotsRef.current = next;
+        setShots(next);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        captureBusy.current = false;
+        nextCaptureAt.current = Date.now() + CAPTURE_GAP_MS;
+        streak.current = { angle: null, count: 0 };
+        setCapturing(false);
+      });
   }, []);
 
   const onFaceDetected = useCallback(
@@ -61,37 +122,49 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
         return;
       }
       setFaceSeen(true);
-      const tick = tickForPose(face.yaw, face.pitch);
-      if (tick == null) {
-        return;
-      }
-      setVisited(current => {
-        if (current.has(tick) || isCircleComplete(current)) {
-          return current;
+      const angle = faceAngle(face.yaw, face.pitch);
+      setLivePose(current => (current === angle ? current : angle));
+
+      if (!captureBusy.current) {
+        if (angle && angle === streak.current.angle) {
+          streak.current.count += 1;
+        } else {
+          streak.current = { angle, count: angle ? 1 : 0 };
         }
-        const next = new Set(current);
-        next.add(tick);
-        return next;
-      });
+
+        if (
+          angle &&
+          !shotsRef.current[angle] &&
+          streak.current.count >= HOLD_FRAMES &&
+          Date.now() >= nextCaptureAt.current
+        ) {
+          captureAngle(angle);
+        }
+      }
     },
-    [succeeded],
+    [captureAngle, succeeded],
   );
 
+  const shotsReady =
+    Boolean(shots.left) && Boolean(shots.center) && Boolean(shots.right);
+
   useEffect(() => {
-    if (isCircleComplete(visited)) {
+    if (shotsReady) {
       finish();
     }
-  }, [finish, visited]);
+  }, [finish, shotsReady]);
 
   const instruction = succeeded
     ? 'Face ID is ready'
-    : 'Move your head slowly to complete the circle.';
+    : 'Hold one pose at a time.';
 
   const detail = succeeded
-    ? 'You showed the angles of your face.'
+    ? 'Left, center, and right are saved.'
     : !faceSeen
       ? 'Position your face in the camera frame.'
-      : null;
+      : livePose && !shots[livePose]
+        ? `Hold ${poseName(livePose)} to save only that photo.`
+        : 'Turn your head clearly left, center, or right.';
 
   return (
     <View style={styles.screen}>
@@ -107,7 +180,15 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
           <View style={[styles.stage, { width: ringSize, height: ringSize }]}>
             <TickRing
               size={ringSize}
-              activeTicks={succeeded ? undefined : visited}
+              activeTicks={
+                succeeded || shotsReady
+                  ? undefined
+                  : ringTicksForShots({
+                      left: Boolean(shots.left),
+                      center: Boolean(shots.center),
+                      right: Boolean(shots.right),
+                    })
+              }
               dimOpacity={0.28}
               activeColor={colors.success}
             />
@@ -120,15 +201,19 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
                   borderRadius: cameraSize / 2,
                 },
               ]}>
-              {isFocused && !succeeded ? (
+              {isFocused && (!succeeded || capturing) ? (
                 <Suspense fallback={<View style={styles.cameraFallback} />}>
                   <Camera
+                    ref={cameraRef}
                     style={StyleSheet.absoluteFill}
                     cameraType={CameraType.Front}
                     resizeMode="cover"
                     iOsDeferredStart={false}
                     faceDetectionEnabled
                     faceDetectionThrottleMs={80}
+                    flashMode="off"
+                    shutterPhotoSound={false}
+                    maxPhotoQualityPrioritization="speed"
                     onFaceDetected={onFaceDetected}
                     onFaceDetectionInstallStatus={event => {
                       setModelState(event.nativeEvent.state);
@@ -141,6 +226,31 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
               <View style={styles.crosshairHorizontal} pointerEvents="none" />
               <View style={styles.crosshairVertical} pointerEvents="none" />
             </View>
+          </View>
+          <View style={styles.shots}>
+            {SHOT_ORDER.map(angle => (
+              <View key={angle} style={styles.shot}>
+                {shots[angle] ? (
+                  <Image
+                    source={{ uri: shots[angle] }}
+                    style={[
+                      styles.shotImage,
+                      livePose === angle && styles.shotActive,
+                    ]}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.shotEmpty,
+                      livePose === angle && styles.shotActive,
+                    ]}
+                  />
+                )}
+                <Text style={styles.shotLabel}>
+                  {angle === 'left' ? 'Left' : angle === 'center' ? 'Center' : 'Right'}
+                </Text>
+              </View>
+            ))}
           </View>
           <Text style={styles.instruction}>{instruction}</Text>
           {detail ? <Text style={styles.detail}>{detail}</Text> : null}
@@ -237,13 +347,47 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth * 2,
     backgroundColor: colors.crosshair,
   },
+  shots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 18,
+    marginTop: 28,
+  },
+  shot: {
+    alignItems: 'center',
+    width: 64,
+  },
+  shotImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+  },
+  shotEmpty: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.muted,
+  },
+  shotActive: {
+    borderWidth: 2,
+    borderColor: colors.success,
+  },
+  shotLabel: {
+    color: colors.body,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 6,
+  },
   instruction: {
     color: colors.title,
     fontSize: 22,
     lineHeight: 28,
     fontWeight: '700',
     textAlign: 'center',
-    marginTop: 36,
+    marginTop: 22,
     paddingHorizontal: 16,
   },
   detail: {
