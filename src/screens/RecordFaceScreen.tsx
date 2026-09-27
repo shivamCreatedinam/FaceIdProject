@@ -17,6 +17,7 @@ import { TickRing } from '../components/TickRing';
 import type { RecordFaceScreenProps } from '../navigation/types';
 import {
   faceAngle,
+  isFaceFullyVisible,
   ringTicksForShots,
   type FaceAngle,
 } from '../services/faceCircle';
@@ -27,6 +28,10 @@ type FaceEvent = {
     faces: Array<{
       yaw: number;
       pitch: number;
+      boundsX: number;
+      boundsY: number;
+      boundsWidth: number;
+      boundsHeight: number;
     }>;
   };
 };
@@ -60,6 +65,7 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
   const cameraSize = ringSize - 44;
 
   const [faceSeen, setFaceSeen] = useState(false);
+  const [faceFramed, setFaceFramed] = useState(false);
   const [modelState, setModelState] = useState<string | null>(null);
   const [succeeded, setSucceeded] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -119,9 +125,18 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
       }
       const face = event.nativeEvent.faces[0];
       if (!face) {
+        streak.current = { angle: null, count: 0 };
+        setFaceFramed(false);
         return;
       }
       setFaceSeen(true);
+      if (!isFaceFullyVisible(face)) {
+        streak.current = { angle: null, count: 0 };
+        setFaceFramed(false);
+        setLivePose(current => (current == null ? current : null));
+        return;
+      }
+      setFaceFramed(true);
       const angle = faceAngle(face.yaw, face.pitch);
       setLivePose(current => (current === angle ? current : angle));
 
@@ -162,7 +177,9 @@ export function RecordFaceScreen({ navigation }: RecordFaceScreenProps) {
     ? 'Left, center, and right are saved.'
     : !faceSeen
       ? 'Position your face in the camera frame.'
-      : livePose && !shots[livePose]
+      : !faceFramed
+        ? 'Keep your whole face inside the circle.'
+        : livePose && !shots[livePose]
         ? `Hold ${poseName(livePose)} to save only that photo.`
         : 'Turn your head clearly left, center, or right.';
 

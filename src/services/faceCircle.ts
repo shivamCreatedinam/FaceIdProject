@@ -73,6 +73,43 @@ export function ringTicksForShots(captured: {
   return ticks;
 }
 
+export type FaceBounds = {
+  boundsX: number;
+  boundsY: number;
+  boundsWidth: number;
+  boundsHeight: number;
+};
+
+/**
+ * The camera is clipped to a circle. A partial head still produces a face box,
+ * so capture only when that whole box sits inside the circle. A half face or a
+ * head cut by the edge has a corner outside this radius.
+ */
+const FULL_FACE_RADIUS = 0.42;
+const MIN_FACE_WIDTH = 0.24;
+const MIN_FACE_HEIGHT = 0.3;
+
+export function isFaceFullyVisible(face: FaceBounds): boolean {
+  const { boundsX, boundsY, boundsWidth, boundsHeight } = face;
+  if (boundsWidth < MIN_FACE_WIDTH || boundsHeight < MIN_FACE_HEIGHT) {
+    return false;
+  }
+
+  const limit = FULL_FACE_RADIUS * FULL_FACE_RADIUS;
+  const corners = [
+    [boundsX, boundsY],
+    [boundsX + boundsWidth, boundsY],
+    [boundsX, boundsY + boundsHeight],
+    [boundsX + boundsWidth, boundsY + boundsHeight],
+  ];
+
+  return corners.every(([x, y]) => {
+    const dx = x - 0.5;
+    const dy = y - 0.5;
+    return dx * dx + dy * dy <= limit;
+  });
+}
+
 export type FaceAngle = 'left' | 'center' | 'right';
 
 const CENTER_YAW = 12;

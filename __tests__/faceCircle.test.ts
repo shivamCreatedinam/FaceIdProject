@@ -2,6 +2,7 @@ import {
   COMPLETION_PERCENT,
   faceAngle,
   isCircleComplete,
+  isFaceFullyVisible,
   RING_TICKS,
   ringTicksForShots,
   tickForPose,
@@ -62,6 +63,41 @@ describe('face circle coverage', () => {
     expect([...left].some(tick => right.has(tick))).toBe(false);
     expect([...left].some(tick => center.has(tick))).toBe(false);
     expect([...right].some(tick => center.has(tick))).toBe(false);
+  });
+
+  it('captures only when the whole face is inside the circle', () => {
+    expect(
+      isFaceFullyVisible({
+        boundsX: 0.3,
+        boundsY: 0.24,
+        boundsWidth: 0.4,
+        boundsHeight: 0.46,
+      }),
+    ).toBe(true);
+    expect(
+      isFaceFullyVisible({
+        boundsX: 0,
+        boundsY: 0.25,
+        boundsWidth: 0.42,
+        boundsHeight: 0.5,
+      }),
+    ).toBe(false);
+    expect(
+      isFaceFullyVisible({
+        boundsX: 0.32,
+        boundsY: 0,
+        boundsWidth: 0.36,
+        boundsHeight: 0.34,
+      }),
+    ).toBe(false);
+    expect(
+      isFaceFullyVisible({
+        boundsX: 0.4,
+        boundsY: 0.4,
+        boundsWidth: 0.12,
+        boundsHeight: 0.12,
+      }),
+    ).toBe(false);
   });
 
   it('names center, left, and right poses from the mirrored front camera', () => {
