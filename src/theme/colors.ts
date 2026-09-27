@@ -1,0 +1,16 @@
+export const colors = {
+  background: '#000000',
+  title: '#FFFFFF',
+  body: '#98989F',
+  tick: '#E5E5EA',
+  button: '#0A84FF',
+  buttonText: '#FFFFFF',
+  secondaryButton: '#2C2C2E',
+  circleButton: '#3A3A3C',
+  card: '#1C1C1E',
+  danger: '#FF453A',
+  success: '#30D158',
+  crosshair: 'rgba(176, 196, 204, 0.55)',
+  sheet: '#1C1C1E',
+  muted: '#636366',
+};
